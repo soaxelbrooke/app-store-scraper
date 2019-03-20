@@ -122,8 +122,8 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
     let conn = Connection::open("database.sqlite")?;
 
     conn.execute(r#"
-        create table if not exists app_versions (
-            app_id text not null,
+        create table if not exists apps (
+            app_id text not null primary key,
             updated_at text,
             category text not null,
             name text not null,
@@ -131,8 +131,7 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
             summary text not null,
             released_at text not null,
             inserted_at text not null,
-            xml_raw text not null,
-            primary key (app_id, updated_at)
+            xml_raw text not null
         );
     "#, NO_PARAMS)?;
 
@@ -392,7 +391,7 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
         &app.xml_raw
     ];
     conn.execute(r#"
-        insert into app_versions (
+        insert into apps (
             app_id,
             updated_at,
             category,
@@ -403,12 +402,21 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
             inserted_at,
             xml_raw
         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        on conflict (app_id) do update set
+            updated_at=excluded.updated_at,
+            category=excluded.category,
+            name=excluded.name,
+            publisher=excluded.publisher,
+            summary=excluded.summary,
+            released_at=excluded.released_at,
+            inserted_at=excluded.inserted_at,
+            xml_raw=excluded.xml_raw;
     "#, params)?;
     Ok(())
 }
 
 fn get_all_app_ids(conn: &Connection) -> Vec<String> {
-    let mut stmt = conn.prepare("select distinct(app_id) from app_versions").unwrap();
+    let mut stmt = conn.prepare("select distinct(app_id) from apps").unwrap();
     stmt.query_map(NO_PARAMS, |row| {
         row.get(0)
     }).unwrap().map(|res| res.unwrap()).collect()
