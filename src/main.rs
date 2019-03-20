@@ -369,7 +369,7 @@ fn build_app(node: &Element) -> Result<AppVersion, ()> {
             app_id: get_node_attr(node, "id", "id")?,
             category: get_node_attr(node, "category", "id")?,
             inserted_at: Utc::now(),
-            name: get_node_text(node, "text")?,
+            name: get_node_text(node, "name")?,
             publisher: get_node_text(node, "artist")?,
             updated_at: get_node_dt(node, "updated")?,
             released_at: get_node_dt(node, "releaseDate")?,

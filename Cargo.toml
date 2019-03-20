@@ -6,7 +6,7 @@ edition = "2018"
 
 [dependencies]
 
-rusqlite = "0.17"
+rusqlite = { version = "0.17", features = ["bundled"] }
 chrono = { version = "0.4", features = ["serde"] }
 log = "0.4"
 env_logger = "0.6"
