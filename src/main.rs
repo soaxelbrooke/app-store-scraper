@@ -251,14 +251,17 @@ fn build_review (app_id: &String, node: &Element) -> Result<Review, ()> {
 }
 
 fn parse_reviews(app_id: &String, xml: &String) -> Result<Vec<Review>, ()> {
-    let document = log_and_erase_err(&Element::parse(xml.as_bytes()), "Couldn't parse XML from document")?;
-    let mut results: Vec<Review> = Vec::new();
+    if let Ok(document) = log_and_erase_err(&Element::parse(xml.as_bytes()), "Couldn't parse XML from document") {
+        let mut results: Vec<Review> = Vec::new();
+        for node in document.children.iter().filter(|node| node.name == "entry") {
+            results.push(build_review(app_id, node)?);
+        }
 
-    for node in document.children.iter().filter(|node| node.name == "entry") {
-        results.push(build_review(app_id, node)?);
+        Ok(results)
+    } else {
+        thread::sleep(time::Duration::from_millis(300000));
+        Err(())
     }
-
-    Ok(results)
 }
 
 fn insert_review(conn: &Connection, review: &Review) -> Result<(), rusqlite::Error> {
@@ -460,7 +463,6 @@ fn scrape_reviews(app_id_requested: Option<&str>) {
     }
 }
 
-// Failing on app ID 1017367213
 fn main() {
     env_logger::init();
     let matches = App::new("app-store-scraper")
