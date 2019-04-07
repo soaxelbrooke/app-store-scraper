@@ -5,9 +5,10 @@ extern crate chrono;
 extern crate rusqlite;
 extern crate reqwest;
 extern crate xmltree;
+extern crate backoff;
 
 use chrono::prelude::*;
-use backoff::{Error, ExponentialBackoff, Operation};
+use backoff::{Error, ExponentialBackoff, Operation, backoff::Backoff};
 use reqwest::header::USER_AGENT;
 use rusqlite::{Connection, NO_PARAMS};
 use rusqlite::Error::SqliteFailure;
@@ -291,8 +292,16 @@ fn insert_review(conn: &Connection, review: &Review) -> Result<(), rusqlite::Err
 }
 
 fn fetch_reviews(app_id: &String, page: &usize) -> Result<Vec<Review>, ()> {
-    let resp = fetch_url(&format!("https://itunes.apple.com/us/rss/customerreviews/id={}/page={}/sortBy=mostRecent/xml", app_id, page).to_string());
-    parse_reviews(app_id, &log_and_erase_err(&resp, &format!("Unable to fetch reviews for app_id {} and page {}", app_id, page))?)
+    let mut backoff = ExponentialBackoff::default();
+    while let Some(next_backoff) = backoff.next_backoff() {
+        let resp = fetch_url(&format!("https://itunes.apple.com/us/rss/customerreviews/id={}/page={}/sortBy=mostRecent/xml", app_id, page).to_string());
+        if let Ok(reviews) = parse_reviews(app_id, &log_and_erase_err(&resp, &format!("Unable to fetch reviews for app_id {} and page {}", app_id, page))?) {
+            return Ok(reviews);
+        } else {
+            thread::sleep(next_backoff);
+        }
+    }
+    Err(())
 }
 
 fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(), ()> {
