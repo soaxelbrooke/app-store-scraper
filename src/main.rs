@@ -298,6 +298,7 @@ fn fetch_reviews(app_id: &String, page: &usize) -> Result<Vec<Review>, ()> {
         if let Ok(reviews) = parse_reviews(app_id, &log_and_erase_err(&resp, &format!("Unable to fetch reviews for app_id {} and page {}", app_id, page))?) {
             return Ok(reviews);
         } else {
+            warn!("Failed to parse reviews, sleeping for {} seconds.", next_backoff.as_secs());
             thread::sleep(next_backoff);
         }
     }
