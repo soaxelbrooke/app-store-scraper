@@ -1,11 +1,14 @@
-#[macro_use]
-extern crate log;
+#[macro_use] extern crate log;
+#[macro_use] extern crate lazy_static;
+
 extern crate env_logger;
 extern crate chrono;
 extern crate rusqlite;
 extern crate reqwest;
 extern crate xmltree;
 extern crate backoff;
+extern crate prometheus;
+extern crate hyper;
 
 use chrono::prelude::*;
 use backoff::{Error, ExponentialBackoff, Operation, backoff::Backoff};
@@ -16,6 +19,10 @@ use xmltree::Element;
 use std::io::{Cursor, Read};
 use std::{thread, time, str, process};
 use clap::{Arg, App};
+use prometheus::{Counter, Opts, TextEncoder, Encoder, register_counter};
+use hyper::rt::Future;
+use hyper::service::service_fn_ok;
+use hyper::{Body, Request, Response, Server};
 
 const CHROME_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.77 Safari/537.36";
 const APP_CATEGORIES: &'static [i64] = &[
@@ -91,6 +98,18 @@ const APP_CATEGORIES: &'static [i64] = &[
     13030,
     6022,
 ];
+const METRICS_PORT: u16 = 9803;
+
+lazy_static! {
+    static ref APP_SCRAPES: Counter = register_counter!(Opts::new(
+        "ios_app_scrape_count",
+        "Count of iOS apps scraped",
+    )).unwrap();
+    static ref REVIEW_SCRAPES: Counter = register_counter!(Opts::new(
+        "ios_review_scrape_count",
+        "Count of iOS reviews scraped",
+    )).unwrap();
+}
 
 #[derive(Debug)]
 struct AppVersion {
@@ -288,6 +307,7 @@ fn insert_review(conn: &Connection, review: &Review) -> Result<(), rusqlite::Err
             xml_raw
         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
     "#, params)?;
+    REVIEW_SCRAPES.inc();
     Ok(())
 }
 
@@ -421,6 +441,7 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
             inserted_at=excluded.inserted_at,
             xml_raw=excluded.xml_raw;
     "#, params)?;
+    APP_SCRAPES.inc();
     Ok(())
 }
 
@@ -469,6 +490,27 @@ fn scrape_reviews(app_id_requested: Option<&str>) {
     }
 }
 
+fn metric_service(_req: Request<Body>) -> Response<Body> {
+    let encoder = TextEncoder::new();
+    let mut buffer = vec![];
+    let mf = prometheus::gather();
+    encoder.encode(&mf, &mut buffer).unwrap();
+    Response::builder()
+        .header(hyper::header::CONTENT_TYPE, encoder.format_type())
+        .body(Body::from(buffer))
+        .unwrap()
+}
+
+fn run_metrics_server() {
+    let addr = ([127, 0, 0, 1], METRICS_PORT).into();
+    let service = || service_fn_ok(metric_service);
+    let server = Server::bind(&addr)
+        .serve(service)
+        .map_err(|e| panic!("{}", e));
+
+    hyper::rt::run(server);
+}
+
 fn main() {
     env_logger::init();
     let matches = App::new("app-store-scraper")
@@ -486,9 +528,11 @@ fn main() {
     
     let mode = matches.value_of("mode").unwrap_or("reviews");
     if mode == "apps" {
+        std::thread::spawn(run_metrics_server);
         scrape_top_apps();
     } else if mode == "reviews" {
         let app_id_requested = matches.value_of("app_id");
+        std::thread::spawn(run_metrics_server);
         scrape_reviews(app_id_requested);
     } else {
         error!("Didn't understand requested mode {}", mode);
