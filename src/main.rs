@@ -502,7 +502,7 @@ fn metric_service(_req: Request<Body>) -> Response<Body> {
 }
 
 fn run_metrics_server() {
-    let addr = ([127, 0, 0, 1], METRICS_PORT).into();
+    let addr = ([0, 0, 0, 0], METRICS_PORT).into();
     let service = || service_fn_ok(metric_service);
     let server = Server::bind(&addr)
         .serve(service)
