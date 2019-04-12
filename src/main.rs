@@ -175,7 +175,7 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
 
 fn fetch_url(url: &str) -> Result<String, Error<reqwest::Error>> {
     debug!("Requesting URL {}", url);
-    thread::sleep(time::Duration::from_millis(100));
+    thread::sleep(time::Duration::from_millis(50));
     let mut op = || {
         debug!("Fetching {}", url);
         let client = reqwest::Client::new();
@@ -312,17 +312,16 @@ fn insert_review(conn: &Connection, review: &Review) -> Result<(), rusqlite::Err
 }
 
 fn fetch_reviews(app_id: &String, page: &usize) -> Result<Vec<Review>, ()> {
-    let mut backoff = ExponentialBackoff::default();
-    while let Some(next_backoff) = backoff.next_backoff() {
-        let resp = fetch_url(&format!("https://itunes.apple.com/us/rss/customerreviews/id={}/page={}/sortBy=mostRecent/xml", app_id, page).to_string());
-        if let Ok(reviews) = parse_reviews(app_id, &log_and_erase_err(&resp, &format!("Unable to fetch reviews for app_id {} and page {}", app_id, page))?) {
-            return Ok(reviews);
-        } else {
-            warn!("Failed to parse reviews, sleeping for {} seconds.", next_backoff.as_secs());
-            thread::sleep(next_backoff);
-        }
+    let resp = fetch_url(&format!("https://itunes.apple.com/us/rss/customerreviews/id={}/page={}/sortBy=mostRecent/xml", app_id, page).to_string());
+    let content: String = log_and_erase_err(&resp, &format!("Unable to fetch reviews for app_id {} and page {}", app_id, page))?;
+    
+    if content.len() > 0 {
+        parse_reviews(app_id, &content)
+    } else {
+        error!("Received response with no content for app {}, sleeping then moving on...", app_id);
+        thread::sleep(time::Duration::from_secs(60));
+        Ok(vec!())
     }
-    Err(())
 }
 
 fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(), ()> {
