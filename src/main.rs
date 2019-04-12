@@ -11,7 +11,7 @@ extern crate prometheus;
 extern crate hyper;
 
 use chrono::prelude::*;
-use backoff::{Error, ExponentialBackoff, Operation, backoff::Backoff};
+use backoff::{Error, ExponentialBackoff, Operation};
 use reqwest::header::USER_AGENT;
 use rusqlite::{Connection, NO_PARAMS};
 use rusqlite::Error::SqliteFailure;
