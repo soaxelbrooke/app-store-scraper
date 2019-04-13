@@ -13,8 +13,7 @@ extern crate hyper;
 use chrono::prelude::*;
 use backoff::{Error, ExponentialBackoff, Operation};
 use reqwest::header::USER_AGENT;
-use rusqlite::{Connection, NO_PARAMS};
-use rusqlite::Error::SqliteFailure;
+use rusqlite::{Connection, NO_PARAMS, Error::SqliteFailure, params};
 use xmltree::Element;
 use std::io::{Cursor, Read};
 use std::{thread, time, str, process};
@@ -167,6 +166,17 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
             author_name text not null,
             inserted_at text not null,
             xml_raw text not null
+        );
+    "#, NO_PARAMS)?;
+
+    conn.execute(r#"
+        create table if not exists scrapes (
+            app_id text not null,
+            scrape_start text not null,
+            scrape_end text not null,
+            newest_review text,
+            oldest_review text,
+            items_scraped integer
         );
     "#, NO_PARAMS)?;
 
@@ -324,8 +334,11 @@ fn fetch_reviews(app_id: &String, page: &usize) -> Result<Vec<Review>, ()> {
     }
 }
 
-fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(), ()> {
+fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(Option<i64>, Option<DateTime<Utc>>, Option<DateTime<Utc>>), ()> {
     info!("Scraping reviews for app ID {}", app_id);
+    let mut scraped = None;
+    let mut newest = None;
+    let mut oldest = None;
     for page in 1..10 {
         let reviews = fetch_reviews(app_id, &page)?;
         for review in reviews.iter() {
@@ -334,17 +347,38 @@ fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(), ()>
                 if let SqliteFailure(result_code, _) = err {
                     if result_code.extended_code == 1555 {
                         debug!("Found duplicate review, stopping for this app.");
-                        return Ok(());
+                        return Ok((scraped, oldest, newest));
                     } else {
                         error!("Unexpected sqlite error: {}", err);
                     }
                 } else {
                     error!("Unexpected sqlite error: {}", err);
                 }
+            } else {
+                if let Some(_s) = scraped {
+                    scraped = Some(_s + 1);
+                } else {
+                    scraped = Some(1);
+                }
+                if let Some(_newest) = newest {
+                    if _newest < review.updated_at {
+                        newest = Some(review.updated_at);
+                    }
+                } else {
+                    newest = Some(review.updated_at);
+                }
+
+                if let Some(_oldest) = oldest {
+                    if _oldest > review.updated_at {
+                        oldest = Some(review.updated_at);
+                    }
+                } else {
+                    oldest = Some(review.updated_at);
+                }
             }
         }
     }
-    Ok(())
+    Ok((scraped, oldest, newest))
 }
 
 fn pull_top_apps_for_category(conn: &Connection, category: &i64) -> Result<(), ()> {
@@ -444,9 +478,38 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
     Ok(())
 }
 
-fn get_all_app_ids(conn: &Connection) -> Vec<String> {
-    let mut stmt = conn.prepare("select distinct(app_id) from apps").unwrap();
-    stmt.query_map(NO_PARAMS, |row| {
+// fn get_all_app_ids(conn: &Connection) -> Vec<String> {
+//     let mut stmt = conn.prepare("select distinct(app_id) from apps").unwrap();
+//     stmt.query_map(NO_PARAMS, |row| {
+//         row.get(0)
+//     }).unwrap().map(|res| res.unwrap()).collect()
+// }
+
+fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
+    // Try to infer unscraped reviews by scrape records
+    let num_apps_scraped: i64 = conn.prepare(r#"
+        select count(distinct(app_id)) from scrapes
+    "#).unwrap().query_map(NO_PARAMS, |row| row.get(0)).unwrap().next().unwrap().unwrap();
+
+    if num_apps_scraped > 1000 {
+        conn.prepare(r#"
+            with scrape_stats as (
+                select
+                    app_id,
+                    datetime(max(newest_review)) - datetime(min(oldest_review)) as period,
+                    sum(items_scraped) as items_scraped,
+                    current_timestamp - datetime(max(scrape_start))) as age
+                from scrapes
+                group by app_id
+            )
+            select app_id from scrape_stats order by age * items_scraped / period desc limit 1000
+        "#).unwrap()
+    } else {
+        // Fall back to just pulling all app IDs ordered by when they were updated
+        conn.prepare(r#"
+            select distinct(app_id) from apps order by updated_at desc
+        "#).unwrap()
+    }.query_map(NO_PARAMS, |row| {
         row.get(0)
     }).unwrap().map(|res| res.unwrap()).collect()
 }
@@ -475,18 +538,56 @@ fn scrape_reviews(app_id_requested: Option<&str>) {
     let conn = result.unwrap();
     match app_id_requested {
         None => {
-            for app_id in get_all_app_ids(&conn) {
-                if let Err(_err) = pull_reviews_for_app_id(&conn, &app_id) {
-                    error!("Failed to scrape reviews for app {}", app_id);
-                }
+            for app_id in get_app_ids_to_scrape(&conn) {
+                let scrape_start = Utc::now();
+                let (scraped, oldest, newest) = pull_reviews_for_app_id(&conn, &app_id).unwrap();
+                let scrape_end = Utc::now();
+                record_scrape(
+                    &conn,
+                    &String::from(app_id),
+                    &scrape_start,
+                    &scrape_end,
+                    &newest,
+                    &oldest,
+                    &scraped
+                ).unwrap();
             }
         },
         Some(app_id) => {
-            if let Err(_err) = pull_reviews_for_app_id(&conn, &String::from(app_id)) {
-                error!("Failed to scrape reviews for app {}", app_id);
-            }
+            let scrape_start = Utc::now();
+            let (scraped, oldest, newest) = pull_reviews_for_app_id(&conn, &String::from(app_id)).unwrap();
+            let scrape_end = Utc::now();
+            record_scrape(
+                &conn,
+                &String::from(app_id),
+                &scrape_start,
+                &scrape_end,
+                &newest,
+                &oldest,
+                &scraped
+            ).unwrap();
         }
     }
+}
+
+fn record_scrape(conn: &Connection, app_id: &String, scrape_start: &DateTime<Utc>, scrape_end: &DateTime<Utc>, newest: &Option<DateTime<Utc>>, oldest: &Option<DateTime<Utc>>, scraped: &Option<i64>) -> Result<usize, rusqlite::Error> {
+    conn.execute(r#"
+        insert into scrapes (
+            app_id,
+            scrape_start,
+            scrape_end,
+            newest_review,
+            oldest_review,
+            items_scraped
+        ) values ($1, $2, $3, $4, $5, $6);
+    "#, params![
+        app_id, 
+        scrape_start.to_rfc3339_opts(SecondsFormat::Millis, true), 
+        scrape_end.to_rfc3339_opts(SecondsFormat::Millis, true), 
+        newest.map(|dt| dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
+        oldest.map(|dt| dt.to_rfc3339_opts(SecondsFormat::Millis, true)),
+        scraped,
+    ])
 }
 
 fn metric_service(_req: Request<Body>) -> Response<Body> {
