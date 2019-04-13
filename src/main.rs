@@ -498,8 +498,27 @@ fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
                 from scrapes
                 where scrape_start > date(current_timestamp, '-1 year')
                 group by app_id
+            ),
+            stalest_apps as (
+                select 
+                    app_id
+                from scrape_stats
+                order by age desc
+                limit 1000
+            ),
+            most_relavent_apps as (
+                select 
+                    app_id 
+                from scrape_stats 
+                order by age * items_scraped / coalesce(period, 1) desc
+                limit 1000
+            ),
+            selected_apps as (
+                select * from most_relavent_apps
+                union all
+                select * from stalest_apps
             )
-            select app_id from scrape_stats order by age * items_scraped / coalesce(period, 1) desc limit 1000
+            select distinct(app_id) from selected_apps
         "#).unwrap()
     } else {
         // Fall back to just pulling all app IDs ordered by when they were updated
