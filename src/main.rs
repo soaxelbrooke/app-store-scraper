@@ -531,7 +531,9 @@ fn scrape_reviews(app_id_requested: Option<&str>) {
     let conn = result.unwrap();
     match app_id_requested {
         None => {
-            for app_id in get_app_ids_to_scrape(&conn) {
+            let app_ids = get_app_ids_to_scrape(&conn);
+            info!("Scraping {} apps.", app_ids.len());
+            for app_id in app_ids {
                 let scrape_start = Utc::now();
                 let (scraped, oldest, newest) = pull_reviews_for_app_id(&conn, &app_id).unwrap();
                 let scrape_end = Utc::now();
