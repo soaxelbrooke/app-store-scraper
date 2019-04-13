@@ -496,7 +496,7 @@ fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
                     sum(items_scraped) as items_scraped,
                     strftime('%s', 'now') - strftime('%s', max(scrape_start)) as age
                 from scrapes
-                where newest_review > date(current_timestamp, '-1 year')
+                where scrape_start > date(current_timestamp, '-1 year')
                 group by app_id
             )
             select app_id from scrape_stats order by age * items_scraped / coalesce(period, 1) desc limit 1000
