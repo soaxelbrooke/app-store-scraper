@@ -340,42 +340,45 @@ fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(Option
     let mut newest = None;
     let mut oldest = None;
     for page in 1..10 {
-        let reviews = fetch_reviews(app_id, &page)?;
-        for review in reviews.iter() {
-            let result = insert_review(conn, &review);
-            if let Err(err) = result {
-                if let SqliteFailure(result_code, _) = err {
-                    if result_code.extended_code == 1555 {
-                        debug!("Found duplicate review, stopping for this app.");
-                        return Ok((scraped, oldest, newest));
+        if let Ok(reviews) = fetch_reviews(app_id, &page) {
+            for review in reviews.iter() {
+                let result = insert_review(conn, &review);
+                if let Err(err) = result {
+                    if let SqliteFailure(result_code, _) = err {
+                        if result_code.extended_code == 1555 {
+                            debug!("Found duplicate review, stopping for this app.");
+                            return Ok((scraped, oldest, newest));
+                        } else {
+                            error!("Unexpected sqlite error: {}", err);
+                        }
                     } else {
                         error!("Unexpected sqlite error: {}", err);
                     }
                 } else {
-                    error!("Unexpected sqlite error: {}", err);
-                }
-            } else {
-                if let Some(_s) = scraped {
-                    scraped = Some(_s + 1);
-                } else {
-                    scraped = Some(1);
-                }
-                if let Some(_newest) = newest {
-                    if _newest < review.updated_at {
+                    if let Some(_s) = scraped {
+                        scraped = Some(_s + 1);
+                    } else {
+                        scraped = Some(1);
+                    }
+                    if let Some(_newest) = newest {
+                        if _newest < review.updated_at {
+                            newest = Some(review.updated_at);
+                        }
+                    } else {
                         newest = Some(review.updated_at);
                     }
-                } else {
-                    newest = Some(review.updated_at);
-                }
 
-                if let Some(_oldest) = oldest {
-                    if _oldest > review.updated_at {
+                    if let Some(_oldest) = oldest {
+                        if _oldest > review.updated_at {
+                            oldest = Some(review.updated_at);
+                        }
+                    } else {
                         oldest = Some(review.updated_at);
                     }
-                } else {
-                    oldest = Some(review.updated_at);
                 }
             }
+        } else {
+            error!("Failed to fetch reviews, going to next page...");
         }
     }
     Ok((scraped, oldest, newest))
