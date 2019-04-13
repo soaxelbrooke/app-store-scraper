@@ -108,6 +108,10 @@ lazy_static! {
         "ios_review_scrape_count",
         "Count of iOS reviews scraped",
     )).unwrap();
+    static ref SCRAPE_ERRORS: Counter = register_counter!(Opts::new(
+        "ios_review_error_count",
+        "Count of iOS reviews errors",
+    )).unwrap();
 }
 
 #[derive(Debug)]
@@ -185,7 +189,7 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
 
 fn fetch_url(url: &str) -> Result<String, Error<reqwest::Error>> {
     debug!("Requesting URL {}", url);
-    thread::sleep(time::Duration::from_millis(50));
+    thread::sleep(time::Duration::from_millis(200));
     let mut op = || {
         debug!("Fetching {}", url);
         let client = reqwest::Client::new();
@@ -329,6 +333,7 @@ fn fetch_reviews(app_id: &String, page: &usize) -> Result<Vec<Review>, ()> {
         parse_reviews(app_id, &content)
     } else {
         error!("Received response with no content for app {}, sleeping then moving on...", app_id);
+        SCRAPE_ERRORS.inc();
         thread::sleep(time::Duration::from_secs(60));
         Ok(vec!())
     }
@@ -350,9 +355,11 @@ fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(Option
                             return Ok((scraped, oldest, newest));
                         } else {
                             error!("Unexpected sqlite error: {}", err);
+                            SCRAPE_ERRORS.inc();
                         }
                     } else {
                         error!("Unexpected sqlite error: {}", err);
+                        SCRAPE_ERRORS.inc();
                     }
                 } else {
                     if let Some(_s) = scraped {
@@ -379,6 +386,7 @@ fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(Option
             }
         } else {
             error!("Failed to fetch reviews, going to next page...");
+            SCRAPE_ERRORS.inc();
         }
     }
     Ok((scraped, oldest, newest))
