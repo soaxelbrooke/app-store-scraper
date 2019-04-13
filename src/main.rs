@@ -478,13 +478,6 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
     Ok(())
 }
 
-// fn get_all_app_ids(conn: &Connection) -> Vec<String> {
-//     let mut stmt = conn.prepare("select distinct(app_id) from apps").unwrap();
-//     stmt.query_map(NO_PARAMS, |row| {
-//         row.get(0)
-//     }).unwrap().map(|res| res.unwrap()).collect()
-// }
-
 fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
     // Try to infer unscraped reviews by scrape records
     let num_apps_scraped: i64 = conn.prepare(r#"
@@ -502,7 +495,7 @@ fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
                 from scrapes
                 group by app_id
             )
-            select app_id from scrape_stats order by age * items_scraped / period desc limit 1000
+            select app_id from scrape_stats order by age * items_scraped / coalesce(period, 1) desc limit 1000
         "#).unwrap()
     } else {
         // Fall back to just pulling all app IDs ordered by when they were updated
