@@ -189,7 +189,7 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
 
 fn fetch_url(url: &str) -> Result<String, Error<reqwest::Error>> {
     debug!("Requesting URL {}", url);
-    thread::sleep(time::Duration::from_millis(200));
+    thread::sleep(time::Duration::from_millis(1000));
     let mut op = || {
         debug!("Fetching {}", url);
         let client = reqwest::Client::new();
