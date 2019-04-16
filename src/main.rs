@@ -124,6 +124,7 @@ struct AppVersion {
     summary: String,
     released_at: DateTime<Utc>,
     inserted_at: DateTime<Utc>,
+    icon_url: String,
     xml_raw: String,
 }
 
@@ -154,6 +155,7 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
             summary text not null,
             released_at text not null,
             inserted_at text not null,
+            icon_url text not null,
             xml_raw text not null
         );
     "#, NO_PARAMS)?;
@@ -223,6 +225,15 @@ fn log_empty_and_err<T: Clone>(to_unwrap: &Option<T>, log_message: &str) -> Resu
 
 fn get_node_or_err(node: &Element, name: &str) -> Result<Element, ()> {
     log_empty_and_err(&node.get_child(name).map(|n| n.clone()), &format!("Unable to find node with name {}", name))
+}
+
+fn get_node_with_attr(node: &Element, name: &str, attr: &str, value: &str) -> Result<Element, ()> {
+    log_empty_and_err(
+        &node.children.iter().filter(|e| {
+            e.name == name && e.attributes.get(attr) == Some(&String::from(value))
+        }).nth(0).map(|e| e.to_owned()),
+        &format!("Unable to find node with name {} and {}={}", name, attr, value)
+    )
 }
 
 fn get_text(node: &Element) -> Result<String, ()> {
@@ -446,6 +457,7 @@ fn build_app(node: &Element) -> Result<AppVersion, ()> {
             updated_at: get_node_dt(node, "updated")?,
             released_at: get_node_dt(node, "releaseDate")?,
             summary: get_node_text(node, "summary")?,
+            icon_url: get_text(&get_node_with_attr(node, "image", "height", "100")?)?,
             xml_raw: xml_string,
         }
     )
@@ -461,7 +473,8 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
         &app.summary,
         &app.released_at.to_rfc3339_opts(SecondsFormat::Millis, true),
         &app.inserted_at.to_rfc3339_opts(SecondsFormat::Millis, true),
-        &app.xml_raw
+        &app.icon_url,
+        &app.xml_raw,
     ];
     conn.execute(r#"
         insert into apps (
@@ -473,8 +486,9 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
             summary,
             released_at,
             inserted_at,
+            icon_url,
             xml_raw
-        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         on conflict (app_id) do update set
             updated_at=excluded.updated_at,
             category=excluded.category,
@@ -483,6 +497,7 @@ fn insert_app(conn: &Connection, app: &AppVersion) -> Result<(), rusqlite::Error
             summary=excluded.summary,
             released_at=excluded.released_at,
             inserted_at=excluded.inserted_at,
+            icon_url=excluded.icon_url,
             xml_raw=excluded.xml_raw;
     "#, params)?;
     APP_SCRAPES.inc();
