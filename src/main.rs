@@ -1,6 +1,9 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate lazy_static;
+#[macro_use] extern crate serde_derive;
 
+extern crate serde;
+extern crate serde_json;
 extern crate env_logger;
 extern crate chrono;
 extern crate rusqlite;
@@ -22,6 +25,7 @@ use prometheus::{Counter, Opts, TextEncoder, Encoder, register_counter};
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
 use hyper::{Body, Request, Response, Server};
+
 
 const CHROME_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.77 Safari/537.36";
 const APP_CATEGORIES: &'static [i64] = &[
@@ -98,6 +102,7 @@ const APP_CATEGORIES: &'static [i64] = &[
     6022,
 ];
 const METRICS_PORT: u16 = 9803;
+const SLEEP_MILLIS: u64 = 1000;
 
 lazy_static! {
     static ref APP_SCRAPES: Counter = register_counter!(Opts::new(
@@ -140,6 +145,43 @@ struct Review {
     author_name: String,
     inserted_at: DateTime<Utc>,
     xml_raw: String,
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Deserialize)]
+struct AppSearchResults {
+    resultCount: i64,
+    results: Vec<AppSearchResult>,
+}
+
+#[allow(non_snake_case)]
+#[derive(Debug, Deserialize)]
+struct AppSearchResult {
+    artworkUrl512: String, // icon_url
+    primaryGenreId: i64, // category
+    trackId: i64, // app_id
+    currentVersionReleaseDate: String, // updated_at
+    artistName: String, // publisher
+    trackName: String, // name
+    description: String, // summary
+    releaseDate: String, // released_at
+}
+
+impl std::convert::From<&AppSearchResult> for AppVersion {
+    fn from(r: &AppSearchResult) -> Self {
+        AppVersion {
+            icon_url: r.artworkUrl512.to_owned(),
+            category: r.primaryGenreId.to_string(),
+            app_id: r.trackId.to_string(),
+            updated_at: DateTime::parse_from_rfc3339(&r.currentVersionReleaseDate).map(|dt| dt.with_timezone(&Utc)).unwrap(),
+            released_at: DateTime::parse_from_rfc3339(&r.releaseDate).map(|dt| dt.with_timezone(&Utc)).unwrap(),
+            publisher: r.artistName.to_owned(),
+            name: r.trackName.to_owned(),
+            summary: r.description.to_owned(),
+            inserted_at: Utc::now(),
+            xml_raw: String::from(""),
+        }
+    }
 }
 
 fn maybe_create_db() -> rusqlite::Result<Connection> {
@@ -191,7 +233,7 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
 
 fn fetch_url(url: &str) -> Result<String, Error<reqwest::Error>> {
     debug!("Requesting URL {}", url);
-    thread::sleep(time::Duration::from_millis(1000));
+    thread::sleep(time::Duration::from_millis(SLEEP_MILLIS));
     let mut op = || {
         debug!("Fetching {}", url);
         let client = reqwest::Client::new();
@@ -555,16 +597,18 @@ fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
 
 fn scrape_top_apps() {
     info!("Maybe creating database...");
-    let result = maybe_create_db();
-    if let Err(err) = result {
-        error!("Failed to created database: {}", err);
-        process::exit(1);
+    match maybe_create_db() {
+        Err(err) => {
+            error!("Failed to created database: {}", err);
+            process::exit(1);
+        },
+        Ok(conn) => {
+            for category in APP_CATEGORIES.iter() {
+                pull_top_apps_for_category(&conn, &category).unwrap();
+            }
+            info!("Done!");
+        }
     }
-    let conn = result.unwrap();
-    for category in APP_CATEGORIES.iter() {
-        pull_top_apps_for_category(&conn, &category).unwrap();
-    }
-    info!("Done!");
 }
 
 fn scrape_reviews(app_id_requested: Option<&str>) {
@@ -631,6 +675,60 @@ fn record_scrape(conn: &Connection, app_id: &String, scrape_start: &DateTime<Utc
     ])
 }
 
+fn resolve_missing_apps() {
+    info!("Fetching missing apps.");
+    match maybe_create_db() {
+        Err(err) => {
+            error!("Failed to created database: {}", err);
+            process::exit(1);
+        },
+        Ok(conn) => {
+            match list_missing_apps(&conn) {
+                Ok(app_ids) => {
+                    let mut chunk: Vec<String> = vec!();
+                    for app_id in app_ids {
+                        chunk.push(app_id);
+                        if chunk.len() == 200 {
+                            let apps =  resolve_apps(&chunk).expect("failed to resolve apps");
+                            for app in apps {
+                                insert_app(&conn, &app).expect("Failed to save app.");
+                            }
+                        }
+                    }
+
+                    if chunk.len() > 0 {
+                        let apps =  resolve_apps(&chunk).expect("failed to resolve apps");
+                        for app in apps {
+                            insert_app(&conn, &app).expect("Failed to save app.");
+                        }
+                    }
+                },
+                Err(err) => {
+                    error!("Failed to list missing app IDs: {}", err);
+                    process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+fn resolve_apps(app_ids: &Vec<String>) -> Result<Vec<AppVersion>, ()> {
+    thread::sleep(time::Duration::from_millis(SLEEP_MILLIS));
+    let query = app_ids.join(",");
+    let url = format!("http://itunes.apple.com/lookup?id={}", query);
+    let resp = fetch_url(&url).unwrap();
+    let search_result: AppSearchResults = serde_json::from_str(&resp).unwrap();
+    println!("{:?}", search_result);
+    Ok(search_result.results.iter().map(|r| AppVersion::from(r)).collect())
+}
+
+fn list_missing_apps(conn: &Connection) -> rusqlite::Result<Vec<String>> {
+    conn.prepare("select distinct app_id from reviews except select app_id from apps")
+        .unwrap()
+        .query_map(NO_PARAMS, |row| row.get(0))
+        .unwrap().collect()
+}
+
 fn metric_service(_req: Request<Body>) -> Response<Body> {
     let encoder = TextEncoder::new();
     let mut buffer = vec![];
@@ -660,7 +758,7 @@ fn main() {
             .short("m")
             .long("mode")
             .takes_value(true)
-            .help("Mode to run in ('apps' or 'reviews')"))
+            .help("Mode to run in ('apps', 'reviews', or 'resolve-missing')"))
         .arg(Arg::with_name("app_id")
             .long("app-id")
             .takes_value(true)
@@ -675,6 +773,9 @@ fn main() {
         let app_id_requested = matches.value_of("app_id");
         std::thread::spawn(run_metrics_server);
         scrape_reviews(app_id_requested);
+    } else if mode == "resolve-missing" {
+        std::thread::spawn(run_metrics_server);
+        resolve_missing_apps();
     } else {
         error!("Didn't understand requested mode {}", mode);
     }
