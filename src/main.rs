@@ -398,14 +398,19 @@ fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(Option
     let mut newest = None;
     let mut oldest = None;
     for page in 1..10 {
+        let mut duplicates = 0;
         if let Ok(reviews) = fetch_reviews(app_id, &page) {
             for review in reviews.iter() {
                 let result = insert_review(conn, &review);
                 if let Err(err) = result {
                     if let SqliteFailure(result_code, _) = err {
                         if result_code.extended_code == 1555 {
-                            debug!("Found duplicate review, stopping for this app.");
-                            return Ok((scraped, oldest, newest));
+                            debug!("Found duplicate review.");
+                            duplicates +=1;
+                            if duplicates == 50 {
+                                debug!("Full page of duplciates found, stopping for this app.");
+                                return Ok((scraped, oldest, newest));
+                            }
                         } else {
                             error!("Unexpected sqlite error: {}", err);
                             SCRAPE_ERRORS.inc();
