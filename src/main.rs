@@ -584,7 +584,7 @@ fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
                 limit 1000
             ),
             unscraped_apps as (
-                select app_id from apps except select distinct app_id from scrapes
+                select app_id from apps except select distinct app_id from scrapes limit 1000
             ),
             selected_apps as (
                 select * from unscraped_apps
