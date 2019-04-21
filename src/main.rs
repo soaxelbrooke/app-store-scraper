@@ -304,7 +304,7 @@ fn get_node_attr(node: &Element, name: &str, attr: &str) -> Result<String, ()> {
     get_node_or_err(node, name)?.attributes.get(attr).ok_or(()).map(|s| s.clone())
 }
 
-fn build_review (app_id: &String, node: &Element) -> Result<Review, ()> {
+fn build_review(app_id: &String, node: &Element) -> Result<Review, ()> {
     let mut xml_curs: Cursor<Vec<u8>> = Cursor::new(Vec::new());
     log_and_erase_err(&node.write(&mut xml_curs), "Couldn't write XML to cursor")?;
     xml_curs.set_position(0);
@@ -583,7 +583,12 @@ fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
                 order by age * items_scraped / coalesce(period, 1) desc
                 limit 1000
             ),
+            unscraped_apps as (
+                select app_id from apps except select distinct app_id from scrapes
+            ),
             selected_apps as (
+                select * from unscraped_apps
+                union all
                 select * from most_relavent_apps
                 union all
                 select * from stalest_apps
