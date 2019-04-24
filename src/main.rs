@@ -187,7 +187,7 @@ impl std::convert::From<&AppSearchResult> for AppVersion {
 fn maybe_create_db() -> rusqlite::Result<Connection> {
     let conn = Connection::open("database.sqlite")?;
 
-    conn.execute("pragma journal_mode=WAL;", NO_PARAMS)?;
+    conn.pragma_update(None, "journal_mode", &"wal")?;
 
     conn.execute(r#"
         create table if not exists apps (
