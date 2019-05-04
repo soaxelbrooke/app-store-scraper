@@ -395,7 +395,6 @@ fn fetch_reviews(app_id: &String, page: &usize) -> Result<Vec<Review>, ()> {
 }
 
 fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(Option<i64>, Option<DateTime<Utc>>, Option<DateTime<Utc>>), ()> {
-    info!("Scraping reviews for app ID {}", app_id);
     let mut scraped = None;
     let mut newest = None;
     let mut oldest = None;
@@ -576,7 +575,7 @@ fn get_app_ids_to_scrape(conn: &Connection) -> Vec<String> {
                     app_id
                 from scrape_stats
                 order by age desc
-                limit 1000
+                limit 200
             ),
             most_relavent_apps as (
                 select 
@@ -638,6 +637,7 @@ fn scrape_reviews(app_id_requested: Option<&str>) {
             for app_id in app_ids {
                 let scrape_start = Utc::now();
                 let (scraped, oldest, newest) = pull_reviews_for_app_id(&conn, &app_id).unwrap();
+                info!("Scraped {} reviews for app ID {}", scraped.unwrap_or(0), app_id);
                 let scrape_end = Utc::now();
                 record_scrape(
                     &conn,
