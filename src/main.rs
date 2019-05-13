@@ -104,7 +104,7 @@ const APP_CATEGORIES: &'static [i64] = &[
     6022,
 ];
 const METRICS_PORT: u16 = 9803;
-const SLEEP_MILLIS: u64 = 3500;
+const SLEEP_MILLIS: u64 = 1500;
 
 lazy_static! {
     static ref APP_SCRAPES: Counter = register_counter!(Opts::new(
@@ -249,8 +249,8 @@ fn fetch_delay() {
     if now < sleep_until {
         let sleep_dur = sleep_until.duration_since(now).expect("Couldn't subtract dates");
         thread::sleep(sleep_dur);
-        *last_request = now;
     }
+    *last_request = sleep_until;
 }
 
 fn fetch_url(url: &str) -> Result<String, Error<reqwest::Error>> {
