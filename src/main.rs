@@ -104,7 +104,7 @@ const APP_CATEGORIES: &'static [i64] = &[
     6022,
 ];
 const METRICS_PORT: u16 = 9803;
-const SLEEP_MILLIS: u64 = 2500;
+const SLEEP_MILLIS: u64 = 3500;
 
 lazy_static! {
     static ref APP_SCRAPES: Counter = register_counter!(Opts::new(
