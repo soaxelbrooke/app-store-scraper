@@ -25,6 +25,8 @@ use prometheus::{Counter, Opts, TextEncoder, Encoder, register_counter};
 use hyper::rt::Future;
 use hyper::service::service_fn_ok;
 use hyper::{Body, Request, Response, Server};
+use std::time::{SystemTime, Duration};
+use std::sync::Mutex;
 
 
 const CHROME_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.77 Safari/537.36";
@@ -102,7 +104,7 @@ const APP_CATEGORIES: &'static [i64] = &[
     6022,
 ];
 const METRICS_PORT: u16 = 9803;
-const SLEEP_MILLIS: u64 = 1000;
+const SLEEP_MILLIS: u64 = 1500;
 
 lazy_static! {
     static ref APP_SCRAPES: Counter = register_counter!(Opts::new(
@@ -117,6 +119,13 @@ lazy_static! {
         "ios_review_error_count",
         "Count of iOS reviews errors",
     )).unwrap();
+    static ref PROXIES: Vec<Option<String>> = if let Ok(var) = std::env::var("PROXIES") {
+        var.split(",").map(|s| {
+            if s.len() > 0 { Some(s.to_string()) } else { None }
+        }).collect()
+    } else { vec!(None) };
+    static ref PROXY_NUM: Mutex<usize> = Mutex::new(0);
+    static ref LAST_REQUEST: Mutex<SystemTime> = Mutex::new(SystemTime::now());
 }
 
 #[derive(Debug)]
@@ -233,13 +242,36 @@ fn maybe_create_db() -> rusqlite::Result<Connection> {
     Ok(conn)
 }
 
+fn fetch_delay() {
+    let mut last_request = LAST_REQUEST.lock().unwrap();
+    let sleep_until: SystemTime = *last_request + Duration::from_millis(SLEEP_MILLIS / PROXIES.len() as u64);
+    let now: SystemTime = SystemTime::now();
+    if now < sleep_until {
+        let sleep_dur = sleep_until.duration_since(now).expect("Couldn't subtract dates");
+        thread::sleep(sleep_dur);
+        *last_request = now;
+    }
+}
+
 fn fetch_url(url: &str) -> Result<String, Error<reqwest::Error>> {
     debug!("Requesting URL {}", url);
-    thread::sleep(time::Duration::from_millis(SLEEP_MILLIS));
+    fetch_delay();
     let mut op = || {
-        debug!("Fetching {}", url);
-        let client = reqwest::Client::new();
-        let mut resp = client.get(url).header(USER_AGENT, CHROME_USER_AGENT).send()?;
+        let mut proxy_num = PROXY_NUM.lock().unwrap();
+        let proxy = &PROXIES[*proxy_num];
+        debug!("Fetching {} with proxy {:?}", url, &proxy);
+        let client = match proxy {
+            Some(proxy) => reqwest::Client::builder().danger_accept_invalid_certs(true).proxy(reqwest::Proxy::http(proxy)?).build()?,
+            None => reqwest::Client::new(),
+        };
+        let mut resp = client.get(url).header(USER_AGENT, CHROME_USER_AGENT).send().map_err(|e| {
+            error!("Failed to fetch URL {}: {:?}", url, e);
+            e
+        })?;
+        *proxy_num += 1;
+        if *proxy_num == PROXIES.len() {
+            *proxy_num = 0;
+        }
         Ok(resp.text()?)
     };
 
