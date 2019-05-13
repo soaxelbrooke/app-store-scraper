@@ -104,7 +104,7 @@ const APP_CATEGORIES: &'static [i64] = &[
     6022,
 ];
 const METRICS_PORT: u16 = 9803;
-const SLEEP_MILLIS: u64 = 1500;
+const SLEEP_MILLIS: u64 = 2500;
 
 lazy_static! {
     static ref APP_SCRAPES: Counter = register_counter!(Opts::new(
@@ -261,7 +261,7 @@ fn fetch_url(url: &str) -> Result<String, Error<reqwest::Error>> {
         let proxy = &PROXIES[*proxy_num];
         debug!("Fetching {} with proxy {:?}", url, &proxy);
         let client = match proxy {
-            Some(proxy) => reqwest::Client::builder().danger_accept_invalid_certs(true).proxy(reqwest::Proxy::http(proxy)?).build()?,
+            Some(proxy) => reqwest::Client::builder().danger_accept_invalid_certs(true).proxy(reqwest::Proxy::all(proxy)?).build()?,
             None => reqwest::Client::new(),
         };
         let mut resp = client.get(url).header(USER_AGENT, CHROME_USER_AGENT).send().map_err(|e| {
