@@ -430,7 +430,7 @@ fn pull_reviews_for_app_id(conn: &Connection, app_id: &String) -> Result<(Option
     let mut scraped = None;
     let mut newest = None;
     let mut oldest = None;
-    for page in 1..10 {
+    for page in 1..11 {
         let mut duplicates = 0;
         if let Ok(reviews) = fetch_reviews(app_id, &page) {
             for review in reviews.iter() {
