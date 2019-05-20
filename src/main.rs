@@ -789,7 +789,7 @@ fn run_metrics_server() {
     let service = || service_fn_ok(metric_service);
     let server = Server::bind(&addr)
         .serve(service)
-        .map_err(|e| panic!("{}", e));
+        .map_err(|e| error!("Failed to start metrics server due to: {:?}", e));
 
     hyper::rt::run(server);
 }
