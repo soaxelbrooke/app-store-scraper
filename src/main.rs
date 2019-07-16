@@ -29,7 +29,7 @@ use std::time::{SystemTime, Duration};
 use std::sync::Mutex;
 
 
-const CHROME_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/70.0.3538.77 Safari/537.36";
+const CHROME_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36";
 const APP_CATEGORIES: &'static [i64] = &[
     6000,
     6001,
@@ -104,7 +104,7 @@ const APP_CATEGORIES: &'static [i64] = &[
     6022,
 ];
 const METRICS_PORT: u16 = 9803;
-const SLEEP_MILLIS: u64 = 1500;
+const SLEEP_MILLIS: u64 = 4000;
 
 lazy_static! {
     static ref APP_SCRAPES: Counter = register_counter!(Opts::new(
