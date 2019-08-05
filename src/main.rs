@@ -29,7 +29,7 @@ use std::time::{SystemTime, Duration};
 use std::sync::Mutex;
 
 
-const CHROME_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/74.0.3729.169 Safari/537.36";
+const CHROME_USER_AGENT: &str = "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0";
 const APP_CATEGORIES: &'static [i64] = &[
     6000,
     6001,
